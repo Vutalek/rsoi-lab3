@@ -15,6 +15,8 @@ services:
         condition: service_started
       bonus_service:
         condition: service_started
+      rabbitmq:
+        condition: service_started
 
   flight_service:
     build:
@@ -47,6 +49,8 @@ services:
     depends_on:
       postgres:
         condition: service_started
+      rabbitmq:
+        condition: service_started
 
   bonus_service:
     build:
@@ -76,5 +80,20 @@ services:
       - ./postgres/:/docker-entrypoint-initdb.d/
     expose:
       - 5432
+
+  rabbitmq:
+    image: rabbitmq:management
+    restart: on-failure
+    environment:
+      - RABBITMQ_DEFAULT_USER=rmuser
+      - RABBITMQ_DEFAULT_PASS=rmpassword
+    volumes:
+      - q-data:/var/lib/rabbitmq
+    expose:
+      - 5672
+    ports:
+      - 15672:15672
+
 volumes:
   db-data:
+  q-data:
