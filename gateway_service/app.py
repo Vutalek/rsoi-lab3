@@ -8,6 +8,7 @@ from fastapi import FastAPI, Query, Header, HTTPException, Response, status
 
 from circuit_breaker import CircuitBreaker
 from models import TicketBuyPost
+from rabbit import post_or_queue
 
 app = FastAPI()
 flight_service = os.environ.get("FLIGHT_SERVICE_HOST", "")
@@ -79,7 +80,7 @@ def buy_ticket(x_user_name: Annotated[str, Header()], body: TicketBuyPost):
     current_datetime = dtime.now().isoformat(sep=' ')
 
     # проводим расчёт бонусов
-    if body.paidFromBalance & privilege.status_code == 200:
+    if body.paidFromBalance and privilege.status_code == 200:
         difference = body.price - privilege.json().get("balance", 0)
         if difference <= 0:
             balance_diff = body.price
@@ -89,7 +90,7 @@ def buy_ticket(x_user_name: Annotated[str, Header()], body: TicketBuyPost):
             balance_diff = privilege.json().get("balance", 0)
             paid_by_money = difference
             paid_by_bonuses = privilege.json().get("balance", 0)
-        requests.post(
+        history_done = post_or_queue(
             bonus_service + f"/api/v1/history/{privilege.json().get('id')}",
             json={
                 "ticket_uid": ticket_uid,
@@ -99,7 +100,7 @@ def buy_ticket(x_user_name: Annotated[str, Header()], body: TicketBuyPost):
             }
         )
     else:
-        requests.post(
+        history_done = post_or_queue(
             bonus_service + f"/api/v1/history/{privilege.json().get('id')}",
             json={
                 "ticket_uid": ticket_uid,
@@ -112,11 +113,11 @@ def buy_ticket(x_user_name: Annotated[str, Header()], body: TicketBuyPost):
         paid_by_bonuses = 0
 
     # меняем статус билета
-    requests.post(ticket_service + f"/api/v1/tickets/pay/{ticket_uid}")
+    post_or_queue(ticket_service + f"/api/v1/tickets/pay/{ticket_uid}")
 
     # собираем всю информацию по билету
     flight = requests.get(flight_service + f"/api/v1/flights/{body.flightNumber}").json()
-    current_privilege = privilege = requests.get(bonus_service + f"/api/v1/privileges/user/{x_user_name}").json()
+    current_privilege = requests.get(bonus_service + f"/api/v1/privileges/user/{x_user_name}").json() if history_done else privilege.json()
     response = {
         "ticketUid": ticket_uid,
         "flightNumber": flight.get("flightNumber", ""),
