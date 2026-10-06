@@ -6,12 +6,16 @@ from typing import Annotated
 import requests
 from fastapi import FastAPI, Query, Header, HTTPException, Response, status
 
+from circuit_breaker import CircuitBreaker
 from models import TicketBuyPost
 
 app = FastAPI()
 flight_service = os.environ.get("FLIGHT_SERVICE_HOST", "")
+flight_cb = CircuitBreaker()
 ticket_service = os.environ.get("TICKET_SERVICE_HOST", "")
+ticket_cb = CircuitBreaker()
 bonus_service = os.environ.get("BONUS_SERVICE_HOST", "")
+bonus_cb = CircuitBreaker()
 
 
 @app.get("/manage/health")
@@ -21,14 +25,30 @@ def health():
 
 @app.get("/api/v1/flights")
 def get_all_flights(page: int=1, size: Annotated[int, Query(ge=1, le=100)]=10):
-    return requests.get(flight_service + f"/api/v1/flights?page={page}&size={size}").json()
+    @flight_cb.check_circuit
+    def request():
+        requests.get(flight_service + f"/api/v1/flights?page={page}&size={size}").json()
+    status, flights = request()
+    if not status:
+        flights = {
+            "page": page,
+            "pageSize": size,
+            "totalElements": 0,
+            "items": []
+        }
+    return flights
 
 @app.get("/api/v1/tickets")
 def get_all_user_tickets(x_user_name: Annotated[str, Header()]):
     tickets = requests.get(ticket_service + f"/api/v1/tickets/user/{x_user_name}").json()
     extended_tickets = []
     for ticket in tickets:
-        flight = requests.get(flight_service + f"/api/v1/flights/{ticket.get('flightNumber', '')}").json()
+        @flight_cb.check_circuit
+        def request():
+            return requests.get(flight_service + f"/api/v1/flights/{ticket.get('flightNumber', '')}").json()
+        status, flight = request()
+        if not status:
+            flight = {}
         extended_tickets.append(
             {
                 "ticketUid": ticket.get("ticketUid"),
@@ -121,7 +141,12 @@ def get_ticket(ticket_uid: UUID, x_user_name: Annotated[str, Header()]):
         raise HTTPException("Ticket not found!")
     ticket = ticket.json()
 
-    flight = requests.get(flight_service + f"/api/v1/flights/{ticket.get('flightNumber', '')}").json()
+    @flight_cb.check_circuit
+    def request():
+        return requests.get(flight_service + f"/api/v1/flights/{ticket.get('flightNumber', '')}").json()
+    status, flight = request()
+    if not status:
+        flight = {}
 
     response = {
         "ticketUid": ticket_uid,
@@ -147,7 +172,12 @@ def get_me(x_user_name: Annotated[str, Header()]):
     tickets = requests.get(ticket_service + f"/api/v1/tickets/user/{x_user_name}").json()
     extended_tickets = []
     for ticket in tickets:
-        flight = requests.get(flight_service + f"/api/v1/flights/{ticket.get('flightNumber', '')}").json()
+        @flight_cb.check_circuit
+        def request1():
+            return requests.get(flight_service + f"/api/v1/flights/{ticket.get('flightNumber', '')}").json()
+        status, flight = request1()
+        if not status:
+            flight = {}
         extended_tickets.append(
             {
                 "ticketUid": ticket.get("ticketUid"),
@@ -160,7 +190,12 @@ def get_me(x_user_name: Annotated[str, Header()]):
             }
         )
 
-    privilege = requests.get(bonus_service + f"/api/v1/privileges/user/{x_user_name}").json()
+    @bonus_cb.check_circuit
+    def request2():
+        return requests.get(bonus_service + f"/api/v1/privileges/user/{x_user_name}").json()
+    status, privilege = request2()
+    if not status:
+        privilege = {}
 
     response = {
         "tickets": extended_tickets,
