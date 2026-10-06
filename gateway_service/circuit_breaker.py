@@ -6,6 +6,7 @@ CBState = Literal["CLOSED", "OPEN", "HALF_OPEN"]
 
 class CircuitBreaker:
     fault_count: int
+    success_count: int
     max_count: int
     half_opened_threshold: int
     half_open_count: int
@@ -15,6 +16,7 @@ class CircuitBreaker:
 
     def __init__(self, max_count: int=10, half_opened_threshold: int=2, timer_min: int=2):
         self.fault_count = 0
+        self.success_count = 0
         self.max_count = max_count
 
         self.half_opened_threshold = half_opened_threshold
@@ -49,12 +51,15 @@ class CircuitBreaker:
                 try:
                     result = func(*args, **kwargs)
                 except Exception as e:
+                    self.state = "OPEN"
+                    self.opened_at = datetime.now()
                     self.half_open_count = 0
                     return (False, None)
                 self.half_open_count += 1
                 if self.half_open_count == self.half_opened_threshold:
                     self.state = "CLOSED"
                     self.fault_count = 0
+                    self.success_count = 0
                 return (True, result)
             else: return (False, None)
         return wrapped
