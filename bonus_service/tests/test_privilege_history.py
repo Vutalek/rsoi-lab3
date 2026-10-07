@@ -1,3 +1,26 @@
+import pytest
+
+
+@pytest.mark.parametrize("operation_type, balance_diff", [
+    ("FILL_IN_BALANCE", 150),
+    ("DEBIT_THE_ACCOUNT", 500),
+])
+def test_cancel_history_restores_balance_once(client, operation_type, balance_diff):
+    ticket_uid = "cccccccc-cccc-cccc-cccc-cccccccccccc"
+    response = client.post("/api/v1/history/1", json={
+        "ticket_uid": ticket_uid,
+        "datetime": "2026-10-13 10:15:00",
+        "balance_diff": balance_diff,
+        "operation_type": operation_type,
+    })
+    assert response.status_code == 201
+
+    for _ in range(2):
+        response = client.post(f"/api/v1/history/cancel/{ticket_uid}")
+        assert response.status_code == 204
+        assert client.get("/api/v1/privileges/1").json()["balance"] == 1500
+
+
 def test_get_user_history(client):
     response = client.get("/api/v1/history/1")
 

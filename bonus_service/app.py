@@ -1,4 +1,5 @@
 from uuid import UUID, uuid4
+from datetime import datetime
 from typing import Annotated
 
 from fastapi import FastAPI, Query, HTTPException, Response, status
@@ -149,6 +150,33 @@ def get_history_entry(e_id: int):
         "operation_type": entry.operation_type
     }
     return entry
+
+@app.post("/api/v1/history/cancel/{ticket_uid}")
+def cancel_history(ticket_uid: UUID):
+    with Session(engine) as session:
+        entries = session.scalars(select(PrivilegeHistoryORM).where(
+            PrivilegeHistoryORM.ticket_uid == ticket_uid
+        )).all()
+        if not entries:
+            raise HTTPException(404, detail="Ticket history not found")
+        balance_diff = sum(
+            entry.balance_diff if entry.operation_type == "FILL_IN_BALANCE"
+            else -entry.balance_diff for entry in entries
+        )
+        if balance_diff:
+            privilege = session.get(PrivilegeORM, entries[0].privilege_id)
+            privilege.balance -= balance_diff
+            session.add(PrivilegeHistoryORM(
+                id=session.scalar(select(func.coalesce(func.max(PrivilegeHistoryORM.id), 0) + 1)),
+                privilege_id=privilege.id,
+                ticket_uid=ticket_uid,
+                datetime=datetime.now(),
+                balance_diff=abs(balance_diff),
+                operation_type="DEBIT_THE_ACCOUNT" if balance_diff > 0 else "FILL_IN_BALANCE"
+            ))
+            session.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
 
 @app.post("/api/v1/history/{p_id}")
 def make_history(p_id: int, body: HistoryPost):

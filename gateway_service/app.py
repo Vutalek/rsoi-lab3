@@ -170,6 +170,7 @@ def get_ticket(ticket_uid: UUID, x_user_name: Annotated[str, Header()]):
 def get_ticket(ticket_uid: UUID, x_user_name: Annotated[str, Header()]):
     response = requests.post(ticket_service + f"/api/v1/tickets/cancel/{ticket_uid}")
     if response.status_code == 200:
+        post_or_queue(bonus_service + f"/api/v1/history/cancel/{ticket_uid}")
         return Response(status_code=status.HTTP_204_NO_CONTENT)
     else:
         raise HTTPException(404, "Ticket not found")
