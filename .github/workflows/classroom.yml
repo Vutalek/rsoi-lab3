@@ -39,7 +39,7 @@ jobs:
 
       - name: Run unit tests
         run: |
-          for service in flight_service ticket_service bonus_service; do
+          for service in flight_service ticket_service bonus_service gateway_service; do
             (
               cd "$service"
               python -m pip install -r requirements.txt
@@ -149,6 +149,27 @@ jobs:
           delayRequest: 100
           reporters: '[ "cli" ]'
 
+      - uses: education/autograding@v1
+        id: autograder
+        continue-on-error: true
+
+      - name: Github auto grader mark
+        if: env.HAS_GOOGLE_API_KEY == 'true'
+        uses: Romanow/google-sheet-autograder-marker@v1.0
+        with:
+          google_token: ${{secrets.GOOGLE_API_KEY}}
+          sheet_id: "1xkgjUX6Qmk7rdJG-QPOToav-HWWtthJjnShIKnw3oIY"
+          homework_number: 2
+          user_column: 'D'
+          column_offset: 'F'
+          mark: "'+"
+
+  tolerance:
+    name: Fault tolerance tests on VM
+    needs: postman
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
       - name: Run fault tolerance tests on VM
         timeout-minutes: 15
         shell: bash
@@ -156,7 +177,11 @@ jobs:
           VM_HOST: ${{ secrets.VM_HOST }}
           VM_PORT: ${{ secrets.VM_PORT }}
           VM_USER: ${{ secrets.VM_USER }}
+          VM_SSH_KEY: ${{ secrets.VM_SSH_KEY }}
         run: |
+          umask 077
+          mkdir -p ~/.ssh
+          printf '%s\n' "$VM_SSH_KEY" > ~/.ssh/deploy_key
           ssh -i "$HOME/.ssh/deploy_key" -p "$VM_PORT" \
             -o BatchMode=yes -o IdentitiesOnly=yes \
             -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
@@ -185,18 +210,3 @@ jobs:
           trap cleanup EXIT
           bash ./scripts/test-script.sh v1 bonus_service 8050
           REMOTE
-
-      - uses: education/autograding@v1
-        id: autograder
-        continue-on-error: true
-
-      - name: Github auto grader mark
-        if: env.HAS_GOOGLE_API_KEY == 'true'
-        uses: Romanow/google-sheet-autograder-marker@v1.0
-        with:
-          google_token: ${{secrets.GOOGLE_API_KEY}}
-          sheet_id: "1xkgjUX6Qmk7rdJG-QPOToav-HWWtthJjnShIKnw3oIY"
-          homework_number: 2
-          user_column: 'D'
-          column_offset: 'F'
-          mark: "'+"

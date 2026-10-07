@@ -28,7 +28,7 @@ def health():
 def get_all_flights(page: int=1, size: Annotated[int, Query(ge=1, le=100)]=10):
     @flight_cb.check_circuit
     def request():
-        requests.get(flight_service + f"/api/v1/flights?page={page}&size={size}").json()
+        return requests.get(flight_service + f"/api/v1/flights?page={page}&size={size}").json()
     status, flights = request()
     if not status:
         flights = {
