@@ -5,6 +5,7 @@ from typing import Annotated
 
 import requests
 from fastapi import FastAPI, Query, Header, HTTPException, Response, status
+from fastapi.responses import JSONResponse
 
 from circuit_breaker import CircuitBreaker
 from models import TicketBuyPost
@@ -65,6 +66,13 @@ def get_all_user_tickets(x_user_name: Annotated[str, Header()]):
 
 @app.post("/api/v1/tickets")
 def buy_ticket(x_user_name: Annotated[str, Header()], body: TicketBuyPost):
+    # получаем бонусный счёт до создания билета
+    try:
+        privilege = requests.get(bonus_service + f"/api/v1/privileges/user/{x_user_name}", timeout=5)
+        privilege.raise_for_status()
+    except requests.RequestException:
+        return JSONResponse(status_code=503, content={"message": "Bonus Service unavailable"})
+
     # создаём билет
     ticket_uid = requests.post(
         ticket_service + "/api/v1/tickets",
@@ -75,8 +83,6 @@ def buy_ticket(x_user_name: Annotated[str, Header()], body: TicketBuyPost):
         }
     ).headers["Location"].split('/')[-1]
 
-    # получаем бонусный счёт пользователя
-    privilege = requests.get(bonus_service + f"/api/v1/privileges/user/{x_user_name}")
     current_datetime = dtime.now().isoformat(sep=' ')
 
     # проводим расчёт бонусов
@@ -193,7 +199,9 @@ def get_me(x_user_name: Annotated[str, Header()]):
 
     @bonus_cb.check_circuit
     def request2():
-        return requests.get(bonus_service + f"/api/v1/privileges/user/{x_user_name}").json()
+        response = requests.get(bonus_service + f"/api/v1/privileges/user/{x_user_name}", timeout=5)
+        response.raise_for_status()
+        return response.json()
     status, privilege = request2()
     if not status:
         privilege = {}
@@ -203,14 +211,21 @@ def get_me(x_user_name: Annotated[str, Header()]):
         "privilege": {
             "balance": privilege.get("balance"),
             "status": privilege.get("status")
-        }
+        } if status else {}
     }
     return response
 
 @app.get("/api/v1/privilege")
 def get_privilege(x_user_name: Annotated[str, Header()]):
-    privilege = requests.get(bonus_service + f"/api/v1/privileges/user/{x_user_name}").json()
-    history = requests.get(bonus_service + f"/api/v1/history/{privilege.get('id', '')}").json()
+    try:
+        privilege = requests.get(bonus_service + f"/api/v1/privileges/user/{x_user_name}", timeout=5)
+        privilege.raise_for_status()
+        privilege = privilege.json()
+        history = requests.get(bonus_service + f"/api/v1/history/{privilege.get('id', '')}", timeout=5)
+        history.raise_for_status()
+        history = history.json()
+    except requests.RequestException:
+        return JSONResponse(status_code=503, content={"message": "Bonus Service unavailable"})
 
     response = {
         "balance": privilege.get("balance"),
