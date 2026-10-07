@@ -96,13 +96,13 @@ jobs:
           TARGET="$VM_USER@$VM_HOST"
           git archive --format=tar HEAD |
             ssh "${SSH_OPTIONS[@]}" "$TARGET" \
-              'mkdir -p "$HOME/rsoi-lab2" && tar -xf - -C "$HOME/rsoi-lab2"'
+              'mkdir -p "$HOME/rsoi-lab3" && tar -xf - -C "$HOME/rsoi-lab3"'
           printf '%s\n' "$VM_ENV" |
             ssh "${SSH_OPTIONS[@]}" "$TARGET" \
-              'umask 077; cat > "$HOME/rsoi-lab2/.env"'
+              'umask 077; cat > "$HOME/rsoi-lab3/.env"'
           ssh "${SSH_OPTIONS[@]}" "$TARGET" '
             set -e
-            cd "$HOME/rsoi-lab2"
+            cd "$HOME/rsoi-lab3"
             docker compose up -d --build
             WAIT_PORTS=8080,8070,8060,8050 ./scripts/wait-script.sh
           '
@@ -148,6 +148,43 @@ jobs:
           environment: postman/environment.json
           delayRequest: 100
           reporters: '[ "cli" ]'
+
+      - name: Run fault tolerance tests on VM
+        timeout-minutes: 15
+        shell: bash
+        env:
+          VM_HOST: ${{ secrets.VM_HOST }}
+          VM_PORT: ${{ secrets.VM_PORT }}
+          VM_USER: ${{ secrets.VM_USER }}
+        run: |
+          ssh -i "$HOME/.ssh/deploy_key" -p "$VM_PORT" \
+            -o BatchMode=yes -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            "$VM_USER@$VM_HOST" 'bash -s' <<'REMOTE'
+          set -e
+          cd "$HOME/rsoi-lab3"
+          docker pull postman/newman:alpine
+
+          # Run Newman beside the services without installing Node.js on the VM.
+          newman() {
+            docker run --rm --network host \
+              --user "$(id -u):$(id -g)" \
+              -v "$PWD:$PWD" -w "$PWD" \
+              postman/newman:alpine "$@"
+          }
+          export -f newman
+
+          # Restore the service even when a Postman assertion fails while it is stopped.
+          cleanup() {
+            status=$?
+            trap - EXIT
+            docker compose start bonus_service || status=1
+            WAIT_PORTS=8050 ./scripts/wait-script.sh || status=1
+            exit "$status"
+          }
+          trap cleanup EXIT
+          bash ./scripts/test-script.sh v1 bonus_service 8050
+          REMOTE
 
       - uses: education/autograding@v1
         id: autograder
